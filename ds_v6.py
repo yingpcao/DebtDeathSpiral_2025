@@ -7,7 +7,7 @@ import copy
 # ==========================================
 # 0. 基础映射与智能推断配置
 # ==========================================
-st.set_page_config(page_title="PBoC债务螺旋模型V5.2", layout="wide", page_icon="🌪️")
+st.set_page_config(page_title="PBoC债务螺旋模型V6", layout="wide", page_icon="🌪️")
 
 ORG_CODE_MAP = {
     11: "商业银行", 12: "村镇银行", 14: "住房储蓄银行", 15: "外资银行",
@@ -121,11 +121,13 @@ class DebtSpiralSimulator:
         t1_debt = sum(l.balance for l in self.loans if l.tier == 'T1')
         t2_debt = sum(l.balance for l in self.loans if l.tier == 'T2')
         t3_debt = sum(l.balance for l in self.loans if l.tier == 'T3')
+        counts = self.get_counts()
         self.history.append({
             'Month': self.month,
             'T1_Debt': t1_debt, 'T2_Debt': t2_debt, 'T3_Debt': t3_debt,
-            'Total_Debt': t1_debt + t2_debt + t3_debt,
-            'Savings': self.savings, 'Gap': gap
+            'Savings': self.savings, 'Gap': gap,
+            'T1_Count': counts['T1'], 'T2_Count': counts['T2'], 'T3_Count': counts['T3'],
+            'Total_Debt': t1_debt + t2_debt + t3_debt
         })
 
     def run_month(self):
@@ -277,7 +279,7 @@ def load_and_parse_csv(file):
 # 3. UI 界面
 # ==========================================
 
-st.title("🌪️ 个人债务螺旋模型 V5.2 (业务逻辑修正版)")
+st.title("🌪️ 个人债务螺旋模型 V6 (PBOC版)")
 st.caption("规则修正：R4/D1只进不出，R1剩余期限内可循环")
 
 # --- Sidebar ---
@@ -295,7 +297,7 @@ with st.sidebar:
             
             client_data = df_raw[df_raw["Client_ID"] == client_id].copy()
             st.info(f"已加载 {len(client_data)} 笔信贷记录")
-            st.dataframe(client_data[["Name", "Type", "Limit", "Balance", "Months"]].head(5), height=150)
+            st.dataframe(client_data[["Name", "Org_Code", "Type", "Limit", "Balance", "Payment", "Months"]], height=150)
             
             for _, row in client_data.iterrows():
                 selected_client_loans.append(Loan(
@@ -328,21 +330,21 @@ with st.expander("⚙️ 市场风控与模型参数配置", expanded=True):
             
     with tab_t1:
         c1, c2, c3, c4 = st.columns(4)
-        with c1: max_orgs_t1 = st.number_input("T1上限", 1, 20, 2)
+        with c1: max_orgs_t1 = st.number_input("T1上限", 1, 5, 3)
         with c2: limit_mul_t1 = st.number_input("T1倍数", 1, 50, 12)
         with c3: decay_t1 = st.slider("T1衰减", 0.1, 1.0, 0.90)
         with c4: base_rate_t1 = st.number_input("T1利率", 0.01, 0.36, 0.08)
 
     with tab_t2:
         c1, c2, c3, c4 = st.columns(4)
-        with c1: max_orgs_t2 = st.number_input("T2上限", 1, 20, 5)
+        with c1: max_orgs_t2 = st.number_input("T2上限", 1, 10, 5)
         with c2: limit_mul_t2 = st.number_input("T2倍数", 1, 30, 4)
         with c3: decay_t2 = st.slider("T2衰减", 0.1, 1.0, 0.85)
         with c4: base_rate_t2 = st.number_input("T2利率", 0.01, 0.36, 0.18)
 
     with tab_t3:
         c1, c2, c3, c4 = st.columns(4)
-        with c1: max_orgs_t3 = st.number_input("T3上限", 1, 50, 20)
+        with c1: max_orgs_t3 = st.number_input("T3上限", 1, 20, 10)
         with c2: start_limit_t3 = st.number_input("T3起始", 1000, 100000, 30000)
         with c3: decay_t3 = st.slider("T3衰减", 0.1, 1.0, 0.50)
         with c4: base_rate_t3 = st.number_input("T3利率", 0.01, 0.36, 0.24)
@@ -410,6 +412,13 @@ if run_btn and selected_client_loans:
             fig_liq.add_trace(go.Bar(x=df_h['Month'], y=df_h['Gap'], name='资金缺口', marker_color='red'))
             fig_liq.update_layout(title="流动性生存线", barmode='stack')
             st.plotly_chart(fig_liq, use_container_width=True)
+
+            fig_cnt = go.Figure()
+            fig_cnt.add_trace(go.Scatter(x=df_h['Month'], y=df_h['T1_Count'], name='T1在贷数', line=dict(color='#3498db', width=3)))
+            fig_cnt.add_trace(go.Scatter(x=df_h['Month'], y=df_h['T2_Count'], name='T2在贷数', line=dict(color='#f39c12', width=3)))
+            fig_cnt.add_trace(go.Scatter(x=df_h['Month'], y=df_h['T3_Count'], name='T3在贷数', line=dict(color='#e74c3c', width=3)))
+            fig_cnt.update_layout(title="在贷笔数趋势")
+            st.plotly_chart(fig_cnt, use_container_width=True)
 
     with res_t2:
         df_l = pd.DataFrame(sim.structured_logs)
